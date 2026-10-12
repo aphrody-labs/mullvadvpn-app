@@ -130,7 +130,7 @@ winresource.workspace = true
 # download-and-install half of `mullvad-update`. Keep in sync with the
 # `in_app_upgrade` cfg set in `build.rs`.
 [target.'cfg(any(target_os = "windows", target_os = "macos"))'.dependencies]
-mullvad-update = { workspace = true, features = ["client"] }
+mullvad-update = { workspace = true }
 
 [target.'cfg(target_os="android")'.dependencies]
 async-trait = { workspace = true }
@@ -177,7 +177,12 @@ features = [
 ]
 
 [features]
-default = ["default-allocator"]
+default = ["default-allocator", "in-app-upgrade"]
+# Hosts that embed the daemon own its release lifecycle and leave the standalone
+# app updater out of the binary.
+embedded = []
+# Keep the standalone daemon's updater behavior enabled by default on desktop.
+in-app-upgrade = ["mullvad-update/client"]
 # Allow the API server to use to be configured
 api-override = ["mullvad-api/api-override"]
 cgroup2 = ["talpid-core/cgroup2"]
