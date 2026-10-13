@@ -1,6 +1,8 @@
 //! Manage WireGuard tunnels.
 
 #![deny(missing_docs)]
+// zerocopy derives generate Unicode identifiers for the packed kernel timespec.
+#![allow(non_ascii_idents)]
 
 #[cfg(target_os = "linux")]
 use crate::wireguard_kernel::nm_tunnel;
