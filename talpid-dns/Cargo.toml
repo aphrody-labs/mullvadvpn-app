@@ -14,7 +14,7 @@ thiserror = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures = { workspace = true }
-inotify = "0.10"
+inotify = "0.11"
 nix = { workspace = true, features = ["net"] }
 parking_lot = "0.12.0"
 resolv-conf = "0.7"
