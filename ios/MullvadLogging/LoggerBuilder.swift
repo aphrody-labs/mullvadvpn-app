@@ -15,6 +15,7 @@ import MullvadTypes
 private enum LoggerOutput {
     case fileOutput(_ fileOutput: LogFileOutputStream)
     case osLogOutput(_ subsystem: String)
+    case inAppLogOutput(_ process: InAppLogEntry.Process, _ observer: InAppLogBlockObserver)
 }
 
 public final class LoggerBuilder: @unchecked Sendable {
@@ -34,7 +35,11 @@ public final class LoggerBuilder: @unchecked Sendable {
     private var logRotationErrors: [Error] = []
     private var outputs: [LoggerOutput] = []
     private let metadata: Logger.Metadata
-    private var logLevel: Logger.Level = .debug
+    #if DEBUG
+        private var logLevel: Logger.Level = .trace
+    #else
+        private var logLevel: Logger.Level = .debug
+    #endif
 
     public func addFileOutput(fileURL: URL, header: String) {
         Self.lock.withLock {
@@ -67,6 +72,12 @@ public final class LoggerBuilder: @unchecked Sendable {
         }
     }
 
+    public func addInAppLogOutput(process: InAppLogEntry.Process, observer: InAppLogBlockObserver) {
+        Self.lock.withLock {
+            outputs.append(.inAppLogOutput(process, observer))
+        }
+    }
+
     public func install(_ redactor: LogRedacting) {
         Self.lock.withLock {
             guard Self.initializedLoggingSystem == false else { return }
@@ -80,6 +91,9 @@ public final class LoggerBuilder: @unchecked Sendable {
 
                     case let .osLogOutput(subsystem):
                         return OSLogHandler(subsystem: subsystem, category: label)
+
+                    case let .inAppLogOutput(process, observer):
+                        return InAppLogHandler(process: process, label: label, observer: observer)
                     }
                 }
 

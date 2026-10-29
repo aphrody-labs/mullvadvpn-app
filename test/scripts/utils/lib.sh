@@ -215,13 +215,17 @@ function run_tests_for_os {
         env_arg=()
     fi
 
+    # Prefer `ACCOUNT_TOKENS` over `PARTNER_API_TOKEN` if it set.
     if [[ -z "${ACCOUNT_TOKEN:-}" ]]; then
         # Needed to redact the account number from the output
         ACCOUNT_TOKEN=$($test_manager config account "${env_arg[@]}") || exit 1
+        account_arg=(--account "$ACCOUNT_TOKEN")
+    elif [[ -n "${PARTNER_API_TOKEN+-}" ]]; then
+        account_arg=(--partner-api-token "$PARTNER_API_TOKEN")
     fi
 
     if ! RUST_LOG_STYLE=always $test_manager run-tests \
-        --account "$ACCOUNT_TOKEN" \
+        "${account_arg[@]}" \
         --app-package "${APP_PACKAGE:?Error: APP_PACKAGE not set}" \
         "${upgrade_package_arg[@]}" \
         "${test_report_arg[@]}" \
@@ -281,6 +285,26 @@ function build_current_version {
     fi
 }
 
+function download_with_retries {
+    local url=$1
+    local output=$2
+    local attempts=10
+    local delay=120
+    local attempt=1
+    while true; do
+        if curl -sf -o "$output.part" "$url"; then
+            mv "$output.part" "$output"
+            return 0
+        fi
+        if [ "$attempt" -ge "$attempts" ]; then
+            return 1
+        fi
+        echo "Download failed (attempt $attempt/$attempts), retrying in ${delay}s" 1>&2
+        sleep "$delay"
+        attempt=$((attempt + 1))
+    done
+}
+
 function download_app_package {
     local version=$1
     local os=$2
@@ -300,7 +324,7 @@ function download_app_package {
     package_dir=$(get_package_dir)
     if [[ ! -f "$package_dir/$filename" ]]; then
         echo "Downloading build for $version ($os) from $url"
-        if ! curl -sf -o "$package_dir/$filename" "$url"; then
+        if ! download_with_retries "$url" "$package_dir/$filename"; then
             echo "Failed to download package from $url (hint: build may not exist, check the url)" 1>&2
             exit 1
         fi
@@ -328,7 +352,7 @@ function download_e2e_executable {
     package_dir=$(get_package_dir)
     if [[ ! -f "$package_dir/$filename" ]]; then
         echo "Downloading e2e executable for $version ($os) from $url"
-        if ! curl -sf -o "$package_dir/$filename" "$url"; then
+        if ! download_with_retries "$url" "$package_dir/$filename"; then
             echo "Failed to download package from $url (hint: build may not exist, check the url)" 1>&2
             exit 1
         fi

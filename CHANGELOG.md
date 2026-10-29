@@ -66,6 +66,7 @@ Line wrap the file at 100 chars.                                              Th
 
 ### Fixed
 - Fix LWO not working with with multihop, DAITA on, and PQ off.
+- Fix QUIC obfuscation losing the connection when the path MTU shrinks during a transfer.
 
 #### Linux
 - Parse the `resolv.conf` format using `resolv-conf` crate. This will lead to fewer false negatives
@@ -74,6 +75,10 @@ Line wrap the file at 100 chars.                                              Th
 
 #### Windows
 - Fix "Failed to open named pipe" error.
+
+#### macOS
+- Prevent local DNS resolver from hitting file descriptor limit when hundreds of DNS queries are
+  in-flight. This could cause several other issues like firewall state failing.
 
 ### Security
 - Prevent LAN traffic from leaking into the tunnel when "local network sharing" is enabled.

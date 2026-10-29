@@ -1,10 +1,14 @@
 import SwiftUI
 
 extension Image {
+    static let mullvadIconBack = Image("IconBack")
     static let mullvadIconClose = Image("IconClose")
+    static let mullvadLogo = Image("Logo")
     static let mullvadLogoImage = Image("LogoIcon")
-    static let mullvadLogoText = Image("LogoText")
     static let mullvadIconSettings = Image("IconSettings")
+    static let mullvadIconSettingsError = Image("IconSettingsError")
+    static let mullvadIconSettingsWarning = Image("IconSettingsWarning")
+    static let mullvadIconAccount = Image("IconAccount")
     static let mullvadIconAlert = Image("IconAlert")
     static let mullvadIconSpinner = Image("IconSpinner")
     static let mullvadIconSuccess = Image("IconSuccess")
@@ -41,4 +45,7 @@ extension Image {
     static let mullvadAutomaticMultihopBanner = Image("AutomaticMultihopBanner")
     static let mullvadUniqueFilterBanner = Image("UniqueFilterBanner")
     static let mullvadIconWarning = Image("IconWarning")
+    static let mullvadIconObscure = Image("IconObscure")
+    static let mullvadIconUnobscure = Image("IconUnobscure")
+    static let mullvadIconCopy = Image("IconCopy")
 }

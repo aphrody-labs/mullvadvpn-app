@@ -358,6 +358,20 @@ impl RequestService {
     async fn send_request(&mut self, request: Request<Full<Bytes>>) -> Result<Response<Incoming>> {
         let method = request.request.method().clone();
         let uri = request.uri().clone();
+        let host = request
+            .request
+            .headers()
+            .get(header::HOST)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or_default()
+            .to_owned();
+
+        // authority must only be specified in the host header to maintain
+        // compatibility with HTTP mocking libraries for testing.
+        debug_assert_ne!(host, "");
+        debug_assert!(uri.authority().is_none());
+
+        tracing::trace!("{method} host={host:?} target={uri:?}");
 
         let mut result = self.send_request_timeout(request.clone()).await;
 
@@ -373,16 +387,11 @@ impl RequestService {
             result = self.send_request_timeout(request).await;
         }
 
-        tracing::trace!("{method} {uri:?}");
-
         if let Err(err) = &result
             && err.is_network_error()
             && !self.api_availability.is_offline()
         {
-            tracing::warn!(
-                "request to {host:?} failed: {err:?}",
-                host = uri.host().unwrap_or_default(),
-            );
+            tracing::warn!("request to {host:?} failed: {err:?}");
             self.close_connection();
             self.connection_mode_source.rotate().await;
         }
@@ -669,7 +678,7 @@ struct NewErrorResponse {
     pub r#type: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct RequestFactory {
     service: RequestServiceHandle,
     default_timeout: Duration,
@@ -752,7 +761,7 @@ pub(crate) fn hyper_request<B>(
     body: B,
 ) -> Result<http::Request<B>> {
     let uri = Uri::builder().path_and_query(format!("/{path}")).build()?;
-    let request = http::request::Builder::new()
+    let builder = http::request::Builder::new()
         .method(method)
         .uri(uri)
         .header(header::USER_AGENT, HeaderValue::from_static(USER_AGENT))
@@ -760,8 +769,9 @@ pub(crate) fn hyper_request<B>(
         .header(
             header::HOST,
             HeaderValue::from_str(host).map_err(|_| Error::InvalidHeaderError)?,
-        )
-        .body(body)?;
+        );
+
+    let request = builder.body(body)?;
     Ok(request)
 }
 
@@ -843,7 +853,7 @@ where
     Ok(res)
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MullvadRestHandle {
     pub(crate) service: RequestServiceHandle,
     pub(crate) factory: RequestFactory,

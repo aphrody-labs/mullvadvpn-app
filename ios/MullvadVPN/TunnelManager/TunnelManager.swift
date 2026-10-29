@@ -18,9 +18,6 @@ import Operations
 import PacketTunnelCore
 import UIKit
 
-/// Interval used for periodic polling of tunnel relay status when the packet tunnel is running
-private let tunnelStatusPollInterval: Duration = .milliseconds(500)
-
 /// A class that provides a convenient interface for VPN tunnels configuration, manipulation and
 /// monitoring.
 final class TunnelManager: @unchecked Sendable {
@@ -54,9 +51,12 @@ final class TunnelManager: @unchecked Sendable {
     private var networkMonitor: NWPathMonitor?
 
     private var pendingNetworkPathUpdate: DispatchWorkItem?
-    private static let networkPathUpdateDelay: DispatchTimeInterval = .seconds(
-        5
-    )
+    private static let networkPathUpdateDelay: DispatchTimeInterval = .seconds(5)
+    private static let FOREGROUND_POLL_INTERVAL: Duration = .milliseconds(500)
+    private static let BACKGROUND_POLL_INTERVAL: Duration = .seconds(5)
+
+    /// Interval used for periodic polling of tunnel relay status when the packet tunnel is running
+    private var tunnelStatusPollInterval: Duration = .milliseconds(500)
 
     private var privateKeyRotationTimer: DispatchSourceTimer?
     public private(set) var isRunningPeriodicPrivateKeyRotation = false
@@ -64,6 +64,8 @@ final class TunnelManager: @unchecked Sendable {
 
     private var tunnelStatusPollTimer: DispatchSourceTimer?
     private var isPolling = false
+
+    var onInAppLogEntries: (([InAppLogEntry]) -> Void)?
 
     private var _isConfigurationLoaded = false
     private var _deviceState: DeviceState = .loggedOut
@@ -117,8 +119,15 @@ final class TunnelManager: @unchecked Sendable {
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(applicationDidBecomeActive),
-            name: UIApplication.didBecomeActiveNotification,
+            selector: #selector(willEnterForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(didEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
 
@@ -152,7 +161,10 @@ final class TunnelManager: @unchecked Sendable {
         try await accountManager.updateAccountData()
     }
 
-    func deleteAccount(accountNumber: String) async throws {
+    func deleteLoggedInAccount() async throws {
+        guard let accountNumber = deviceState.accountData?.number else {
+            return
+        }
         _ = try await setAccount(action: .delete(accountNumber))
         removeLastUsedAccount()
         unsetTunnelConfiguration()
@@ -372,8 +384,6 @@ final class TunnelManager: @unchecked Sendable {
     }
 
     func reconnectTunnel(selectNewRelay: Bool, completionHandler: (@Sendable (Error?) -> Void)? = nil) {
-        // Start polling the tunnel immediately when the user reconnects
-        startPollingTunnelStatus(interval: tunnelStatusPollInterval)
         let operation = AsyncBlockOperation(dispatchQueue: internalQueue) { finish -> Cancellable in
             do {
                 guard let tunnel = self.tunnel else {
@@ -425,6 +435,14 @@ final class TunnelManager: @unchecked Sendable {
         operation.addCondition(MutuallyExclusive(category: OperationCategory.manageTunnel.category))
 
         operationQueue.addOperation(operation)
+    }
+
+    func getInAppLogs(completionHandler: @escaping @Sendable (Result<[InAppLogEntry], Error>) -> Void) {
+        guard let tunnel else {
+            completionHandler(.success([]))
+            return
+        }
+        _ = tunnel.getInAppLogs(completionHandler: completionHandler)
     }
 
     func reapplyTunnelConfiguration() {
@@ -661,12 +679,24 @@ final class TunnelManager: @unchecked Sendable {
 
     // MARK: - Private methods
 
-    @objc private func applicationDidBecomeActive() {
-        #if DEBUG
-            logger.debug("Refresh device state and tunnel status due to application becoming active.")
-        #endif
-        refreshTunnelStatus()
-        refreshDeviceState()
+    @objc private func willEnterForeground() {
+        internalQueue.async { [self] in
+            #if DEBUG
+                logger.debug("Refresh device state and tunnel status due to application becoming active.")
+            #endif
+            cancelPollingTunnelStatus()
+            tunnelStatusPollInterval = Self.FOREGROUND_POLL_INTERVAL
+            startPollingTunnelStatus(interval: tunnelStatusPollInterval)
+            refreshDeviceState()
+        }
+    }
+
+    @objc private func didEnterBackground() {
+        internalQueue.async { [self] in
+            cancelPollingTunnelStatus()
+            tunnelStatusPollInterval = Self.BACKGROUND_POLL_INTERVAL
+            startPollingTunnelStatus(interval: tunnelStatusPollInterval)
+        }
     }
 
     private func didUpdateNetworkPath(_ path: Network.NWPath) {
@@ -924,6 +954,14 @@ final class TunnelManager: @unchecked Sendable {
                 }
             }
         }
+
+        #if NEVER_IN_PRODUCTION
+            _ = tunnel.getInAppLogs { [weak self] result in
+                if case let .success(entries) = result, !entries.isEmpty {
+                    self?.onInAppLogEntries?(entries)
+                }
+            }
+        #endif
     }
 
     /// Returns true if the tunnel is in an active state based on NEVPNStatus.

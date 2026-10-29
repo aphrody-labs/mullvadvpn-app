@@ -12,14 +12,16 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.runTest
 import net.mullvad.mullvadvpn.feature.location.impl.RelayListScrollConnection
-import net.mullvad.mullvadvpn.feature.location.impl.search.relayListItems
+import net.mullvad.mullvadvpn.feature.location.impl.data.RELAY_COUNTRY_NORWAY
+import net.mullvad.mullvadvpn.feature.location.impl.data.RELAY_COUNTRY_SWEDEN
+import net.mullvad.mullvadvpn.feature.location.impl.relayListItems
 import net.mullvad.mullvadvpn.lib.common.Lce
 import net.mullvad.mullvadvpn.lib.common.test.TestCoroutineRule
 import net.mullvad.mullvadvpn.lib.common.test.assertLists
 import net.mullvad.mullvadvpn.lib.common.util.isEntryBlocked
 import net.mullvad.mullvadvpn.lib.model.Constraint
+import net.mullvad.mullvadvpn.lib.model.GeoIpLocation
 import net.mullvad.mullvadvpn.lib.model.GeoLocationId
-import net.mullvad.mullvadvpn.lib.model.LatLong
 import net.mullvad.mullvadvpn.lib.model.RecentItem
 import net.mullvad.mullvadvpn.lib.model.Recents
 import net.mullvad.mullvadvpn.lib.model.RelayHopType
@@ -27,6 +29,8 @@ import net.mullvad.mullvadvpn.lib.model.RelayItem
 import net.mullvad.mullvadvpn.lib.model.RelayItemSelection
 import net.mullvad.mullvadvpn.lib.model.RelayListType
 import net.mullvad.mullvadvpn.lib.model.Settings
+import net.mullvad.mullvadvpn.lib.model.TunnelState
+import net.mullvad.mullvadvpn.lib.repository.ConnectionProxy
 import net.mullvad.mullvadvpn.lib.repository.RelayListRepository
 import net.mullvad.mullvadvpn.lib.repository.SettingsRepository
 import net.mullvad.mullvadvpn.lib.repository.WireguardConstraintsRepository
@@ -53,6 +57,7 @@ class SelectLocationListViewModelTest {
     private val mockCustomListRelayItemsUseCase: CustomListsRelayItemUseCase = mockk()
     private val mockSettingsRepository: SettingsRepository = mockk()
     private val mockRecentsUseCase: RecentsUseCase = mockk()
+    private val mockConnectionProxy: ConnectionProxy = mockk()
 
     private val relayListScrollConnection: RelayListScrollConnection = RelayListScrollConnection()
 
@@ -63,6 +68,7 @@ class SelectLocationListViewModelTest {
     private val customListRelayItems = MutableStateFlow<List<RelayItem.CustomList>>(emptyList())
     private val recentsRelayItems = MutableStateFlow<List<RecentItem>?>(emptyList())
     private val settings = MutableStateFlow(mockk<Settings>(relaxed = true))
+    private val tunnelState = MutableStateFlow<TunnelState>(TunnelState.Disconnected(null))
 
     private lateinit var viewModel: SelectLocationListViewModel
 
@@ -80,6 +86,7 @@ class SelectLocationListViewModelTest {
         every { mockCustomListRelayItemsUseCase() } returns customListRelayItems
         every { mockSettingsRepository.settingsUpdates } returns settings
         every { mockRecentsUseCase(any()) } returns recentsRelayItems
+        every { mockConnectionProxy.tunnelState } returns tunnelState
 
         mockkStatic(RELAY_ITEM_LIST_CREATOR_CLASS)
         mockkStatic(LOCATION_UTIL_CLASS)
@@ -242,6 +249,40 @@ class SelectLocationListViewModelTest {
         }
     }
 
+    @Test
+    fun `given relay type single and connected tunnel state hostname should be set as connected`() =
+        runTest {
+            // Arrange
+            viewModel = createSelectLocationListViewModel(RelayListType.Single)
+            filteredRelayList.value = FilteredCountries(testCountries)
+            selectedLocationFlow.value = RelayItemSelection.Single(Constraint.Any)
+            val mockSettings: Settings = mockk()
+            every { mockSettings.recents } returns Recents.Disabled
+            settings.value = mockSettings
+            val connectedRelay = testCountries.first().cities.first().relays.first()
+            val mockGeoIpLocation = mockk<GeoIpLocation>(relaxed = true)
+            every { mockGeoIpLocation.location } returns connectedRelay.id
+            tunnelState.value =
+                TunnelState.Connected(
+                    endpoint = mockk(relaxed = true),
+                    location = mockGeoIpLocation,
+                    featureIndicators = emptyList(),
+                )
+            viewModel.onToggleExpand(item = testCountries.first().id, expand = true)
+            viewModel.onToggleExpand(item = testCountries.first().cities.first().id, expand = true)
+
+            // Act, Assert
+            viewModel.uiState.test {
+                val actualState = awaitItem()
+                assertIs<Lce.Content<SelectLocationListUiState>>(actualState)
+                assertTrue(
+                    actualState.value.relayListItems
+                        .filterIsInstance<RelayListItem.GeoLocationItem>()
+                        .any { it.relayItemId() == connectedRelay.id && it.connected }
+                )
+            }
+        }
+
     private fun createSelectLocationListViewModel(relayListType: RelayListType) =
         SelectLocationListViewModel(
             relayListType = relayListType,
@@ -253,6 +294,7 @@ class SelectLocationListViewModelTest {
             settingsRepository = mockSettingsRepository,
             relayListScrollConnection = relayListScrollConnection,
             recentsUseCase = mockRecentsUseCase,
+            connectionProxy = mockConnectionProxy,
         )
 
     private fun RelayListItem.relayItemId() =
@@ -274,26 +316,14 @@ class SelectLocationListViewModelTest {
 
     companion object {
         private const val RELAY_ITEM_LIST_CREATOR_CLASS =
-            "net.mullvad.mullvadvpn.feature.location.impl.search.RelayItemListCreatorKt"
+            "net.mullvad.mullvadvpn.feature.location.impl.RelayItemListCreatorKt"
         private const val LOCATION_UTIL_CLASS =
             "net.mullvad.mullvadvpn.lib.common.util.LocationUtilKt"
 
         private val testCountries =
             listOf(
-                RelayItem.Location.Country(
-                    id = GeoLocationId.Country("se"),
-                    "Sweden",
-                    listOf(
-                        RelayItem.Location.City(
-                            id = GeoLocationId.City(GeoLocationId.Country("se"), "got"),
-                            "Gothenburg",
-                            LatLong(0f, 0f),
-                            emptyList(),
-                            countryName = "Sweden",
-                        )
-                    ),
-                ),
-                RelayItem.Location.Country(id = GeoLocationId.Country("no"), "Norway", emptyList()),
+                RELAY_COUNTRY_SWEDEN,
+                RELAY_COUNTRY_NORWAY,
             )
     }
 }

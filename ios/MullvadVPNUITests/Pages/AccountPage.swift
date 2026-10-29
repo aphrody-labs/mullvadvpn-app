@@ -14,7 +14,7 @@ class AccountPage: PaymentPage {
     @discardableResult override init(_ app: XCUIApplication) {
         super.init(app)
 
-        self.pageElement = app.otherElements[.accountView]
+        self.pageElement = app.scrollViews[.accountView]
         waitForPageToBeShown()
     }
 
@@ -33,13 +33,18 @@ class AccountPage: PaymentPage {
         return self
     }
 
+    @discardableResult func tapToolbarMenuButton() -> Self {
+        app.buttons[AccessibilityIdentifier.accountToolbarMenuButton.asString].tap()
+        return self
+    }
+
     @discardableResult func tapDeviceManagementButton() -> Self {
         app.buttons[AccessibilityIdentifier.deviceManagementButton.asString].tap()
         return self
     }
 
     func getDeviceName() throws -> String {
-        let deviceNameLabel = app.otherElements[AccessibilityIdentifier.accountPageDeviceNameLabel]
+        let deviceNameLabel = app.staticTexts[AccessibilityIdentifier.accountPageDeviceNameLabel]
         return try XCTUnwrap(deviceNameLabel.value as? String, "Failed to read device name from label")
     }
 
@@ -60,6 +65,12 @@ class AccountPage: PaymentPage {
 
     @discardableResult func waitForPaidUntil(_ date: Date) -> Self {
         app.staticTexts[date.formattedDateString].wait()
+
+        return self
+    }
+
+    @discardableResult func verifyOutOfTime() -> Self {
+        app.staticTexts["OUT OF TIME"].wait()
 
         return self
     }

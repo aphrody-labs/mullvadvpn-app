@@ -32,7 +32,8 @@
     "windows/**",
     "windows-installer/**",
     "typos.toml",
-    ".github/workflows/typos.yml"
+    ".github/workflows/typos.yml",
+    ".github/workflows/desktop-*"
   ],
   "appteam-ios": [
     ".github/workflows/ios*",
@@ -54,6 +55,8 @@
     ".github/pinact.yml",
     ".github/workflows/advisory-team-access.yml",
     ".github/workflows/workflow-check.yml",
+    ".github/actions/code-owner-approval/**",
+    ".github/actions/.gitignore",
     "audits/**",
     "ci/keys/**",
     "ci/verify-locked-down-signatures.sh",

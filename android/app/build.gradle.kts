@@ -9,6 +9,7 @@ import utilities.Variant
 import utilities.allPlayDebugReleaseVariants
 import utilities.appVersionProvider
 import utilities.baselineFilter
+import utilities.configureMissingTranslationCheck
 import utilities.fullReleaseArtifacts
 import utilities.fullReleaseTasks
 import utilities.generateRemapArguments
@@ -20,6 +21,7 @@ import utilities.matchesAny
 import utilities.ossProdAnyBuildType
 import utilities.playImplementation
 import utilities.registerReleaseTask
+import utilities.registerSbomTasks
 import utilities.registerVerifyArtifactsTask
 
 plugins {
@@ -64,6 +66,7 @@ android {
             checkAllWarnings = true
             warningsAsErrors = true
             checkDependencies = true
+            configureMissingTranslationCheck(project, appVersion)
         }
     }
 
@@ -424,6 +427,8 @@ registerReleaseTask(
 )
 
 registerVerifyArtifactsTask(appVersion.name)
+
+registerSbomTasks(appVersion.name.value)
 
 play {
     System.getenv("PLAY_CREDENTIALS_PATH")?.let { serviceAccountCredentials.set(file(it)) }

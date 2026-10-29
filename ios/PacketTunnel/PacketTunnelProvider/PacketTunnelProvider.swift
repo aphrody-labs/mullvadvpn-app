@@ -28,6 +28,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     private var newAppVersionSystemNotificationHandler: NewAppVersionSystemNotificationHandler!
     private let tunnelSettingsUpdater: SettingsUpdater
     private var migrationManager: MigrationManager
+    private let inAppLogBuffer = InAppLogBuffer()
     let migrationFailureIterator = REST.RetryStrategy.failedMigrationRecovery.makeDelayIterator()
 
     private let tunnelSettingsListener = TunnelSettingsListener()
@@ -42,8 +43,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
     }
 
     override init() {
-        Self.configureLogging()
-
+        Self.configureLogging(inAppLogBuffer: inAppLogBuffer)
         providerLogger = Logger(label: "PacketTunnelProvider")
         providerLogger.info("Starting new packet tunnel")
 
@@ -104,8 +104,14 @@ class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         )
 
         #if DEBUG
-            if PacketTunnelDebugSettings.useGotaTun {
-                providerLogger.info("Using GotaTun implementation (debug)")
+            if PacketTunnelDebugSettings.useWireGuard {
+                providerLogger.info("Using WireGuard implementation (debug)")
+                implementation = makeWireGuardGoImplementation(
+                    ipOverrideWrapper: ipOverrideWrapper,
+                    settingsReader: settingsReader,
+                    apiTransportProvider: apiTransportProvider
+                )
+            } else {
                 implementation = GotaTunTunnelImplementation(
                     providerDelegate: GotaTunProviderProxy(provider: self),
                     blockedStateErrorMapper: BlockedStateErrorMapper(),
@@ -120,18 +126,21 @@ class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
                         deviceStateAccessor: DeviceStateAccessor(settingsManager: settingsManager)
                     )
                 )
-            } else {
-                implementation = makeWireGuardGoImplementation(
-                    ipOverrideWrapper: ipOverrideWrapper,
-                    settingsReader: settingsReader,
-                    apiTransportProvider: apiTransportProvider
-                )
             }
         #else
-            implementation = makeWireGuardGoImplementation(
+            implementation = GotaTunTunnelImplementation(
+                providerDelegate: GotaTunProviderProxy(provider: self),
+                blockedStateErrorMapper: BlockedStateErrorMapper(),
+                adapterFactory: RustGotaTunAdapterFactory(),
                 ipOverrideWrapper: ipOverrideWrapper,
                 settingsReader: settingsReader,
-                apiTransportProvider: apiTransportProvider
+                deviceChecker: AsyncDeviceChecker(
+                    remoteService: DeviceCheckRemoteService(
+                        accountsProxy: accountsProxy,
+                        devicesProxy: devicesProxy
+                    ),
+                    deviceStateAccessor: DeviceStateAccessor(settingsManager: settingsManager)
+                )
             )
         #endif
 
@@ -141,7 +150,8 @@ class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
         )
         appMessageHandler = AppMessageHandler(
             packetTunnelActor: implementation.actor,
-            apiRequestProxy: apiRequestProxy
+            apiRequestProxy: apiRequestProxy,
+            inAppLogBuffer: inAppLogBuffer
         )
 
         newAppVersionSystemNotificationHandler = NewAppVersionSystemNotificationHandler(
@@ -328,7 +338,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider, @unchecked Sendable {
 }
 
 extension PacketTunnelProvider {
-    private static func configureLogging() {
+    private static func configureLogging(inAppLogBuffer: InAppLogBuffer) {
         let loggerBuilder = LoggerBuilder.shared
         let header = "PacketTunnel version \(Bundle.main.productVersion)"
         let redactor = RustLogRedactor(containerPaths: [ApplicationConfiguration.containerURL.path])
@@ -339,8 +349,16 @@ extension PacketTunnelProvider {
             ),
             header: header
         )
-        #if DEBUG
+        #if NEVER_IN_PRODUCTION
             loggerBuilder.addOSLogOutput(subsystem: ApplicationTarget.packetTunnel.bundleIdentifier)
+            loggerBuilder.addInAppLogOutput(
+                process: .packetTunnel,
+                observer: InAppLogBlockObserver { log in
+                    Task {
+                        await inAppLogBuffer.append(log)
+                    }
+                }
+            )
         #endif
         loggerBuilder.install(redactor)
 

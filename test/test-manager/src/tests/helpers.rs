@@ -130,15 +130,23 @@ impl ProbeResult {
 /// Return whether the guest exit IP is a Mullvad relay
 pub async fn using_mullvad_exit(rpc: &ServiceClient) -> bool {
     log::info!("Test whether exit IP is a mullvad relay");
-    geoip_lookup_with_retries(rpc)
-        .await
-        .unwrap()
-        .mullvad_exit_ip
+    match geoip_lookup_with_retries(rpc).await {
+        Ok(lookup) => lookup.mullvad_exit_ip,
+        Err(error) => {
+            log::error!("Failed to look up the exit IP, treating it as non-Mullvad: {error:#}");
+            false
+        }
+    }
 }
 
 /// Get VPN tunnel interface name
-pub async fn get_tunnel_interface(client: &mut MullvadProxyClient) -> anyhow::Result<String> {
-    match client.get_tunnel_state().await? {
+pub async fn get_tunnel_interface(client: MullvadProxyClient) -> anyhow::Result<String> {
+    let tunnel_state = wait_for_tunnel_state(client, |state| {
+        state.is_connected() || state.is_connecting()
+    })
+    .await?;
+
+    match tunnel_state {
         TunnelState::Connecting { endpoint, .. } | TunnelState::Connected { endpoint, .. } => {
             let Some(tunnel_interface) = endpoint.tunnel_interface else {
                 bail!("Unknown tunnel interface");

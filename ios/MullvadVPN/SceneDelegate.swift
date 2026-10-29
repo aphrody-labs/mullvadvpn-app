@@ -19,6 +19,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, @preconcurrency Setting
     private let logger = Logger(label: "SceneDelegate")
 
     var window: UIWindow?
+    var logWindow: UIWindow?
     private var privacyOverlayWindow: UIWindow?
     private var isSceneConfigured = false
 
@@ -26,7 +27,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, @preconcurrency Setting
 
     private var tunnelObserver: TunnelObserver?
 
-    private var appDelegate: AppDelegate {
+    var appDelegate: AppDelegate {
         UIApplication.shared.delegate as! AppDelegate
     }
 
@@ -99,7 +100,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, @preconcurrency Setting
             breadcrumbsProvider: appDelegate.breadcrumbsProvider,
             settingsManager: appDelegate.settingsManager,
             logRedactor: appDelegate.logRedactor,
-            migratedSettingsListener: appDelegate.migratedSettingsListener
+            migratedSettingsListener: appDelegate.migratedSettingsListener,
+            inAppLogObserver: appDelegate.inAppLogObserver
         )
 
         appCoordinator?.onShowSettings = { [weak self] in
@@ -120,6 +122,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, @preconcurrency Setting
 
         window?.rootViewController = appCoordinator?.rootViewController
         appCoordinator?.start()
+
+        #if NEVER_IN_PRODUCTION
+            setUpLogOverlay()
+        #endif
     }
 
     private func disableAnimationsIfNeeded() {
@@ -217,6 +223,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate, @preconcurrency Setting
         privacyOverlayWindow = UIWindow(windowScene: windowScene)
         privacyOverlayWindow?.rootViewController = launchViewController
         privacyOverlayWindow?.windowLevel = .alert + 1
+
+        // Forces all navigation bar titles to be white. This is needed since SwiftUI does not provide a way to change the title color.
+        UINavigationBar.appearance().titleTextAttributes = [.foregroundColor: UIColor.primaryTextColor]
+        UINavigationBar.appearance().largeTitleTextAttributes = UINavigationBar.appearance().titleTextAttributes
 
         window?.makeKeyAndVisible()
         addTunnelObserver()

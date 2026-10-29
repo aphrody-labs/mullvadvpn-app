@@ -362,7 +362,7 @@
     <string name="multihop">Multihop</string>
     <string name="multihop_mode">Multihop mode</string>
     <string name="multihop_when_needed">Multihop when needed</string>
-    <string name="multihop_description_slide_1_first_paragraph">Multihop routes your traffic into one WireGuard server and out another, making it harder to trace. This results in increased latency but increases anonymity online. Multihop has three different modes to choose between:\nWhen needed, Always, and Never.</string>
+    <string name="multihop_description_slide_1_first_paragraph">Multihop routes your traffic into one WireGuard server and out another, making it harder to trace. This increases anonymity online at the cost of increased latency. Multihop has three different modes to choose between:\nWhen needed, Always, and Never.</string>
     <string name="multihop_description_slide_2_first_paragraph"><b>When needed</b>\nNot all our locations/servers support every feature in the app. If your selected location/server doesn’t support the features you’ve enabled, the app will automatically multihop via a compatible server. </string>
     <string name="multihop_description_slide_2_second_paragraph">This ensures your connection does not get blocked due to incompatible settings.</string>
     <string name="multihop_description_slide_2_third_paragraph">This will be indicated by the %1$s symbol.</string>
@@ -564,9 +564,9 @@
     <string name="new_multihop_modes_on_to_always">Your multihop setting was migrated from “On” to “Always”</string>
     <string name="new_multihop_modes_off_to_never">Your multihop setting was migrated from “Off” to “Never”</string>
     <string name="new_multihop_modes_off_to_always">Your multihop setting was migrated from “Off” to “Always”</string>
-    <string name="new_multihop_nodes_always_description">Multihop is enabled. Your connection is routed through an entry server before exiting through the selected location.</string>
-    <string name="new_multihop_nodes_when_needed_description">To ensure your current settings work with your selected location, and to avoid blocking your connection, the app might automatically multihop via a different entry server.\nThis will be indicated by the %1$s symbol.</string>
-    <string name="new_multihop_nodes_never_description">Multihop is disabled. Your selected location must support all active settings in order to establish a connection.</string>
+    <string name="new_multihop_modes_always_description">Multihop is enabled. Your connection is routed through an entry server before exiting through the selected location.</string>
+    <string name="new_multihop_modes_when_needed_description">To ensure your current settings work with your selected location, and to avoid blocking your connection, the app might automatically multihop via a different entry server.\nThis will be indicated by the %1$s symbol.</string>
+    <string name="new_multihop_modes_never_description">Multihop is disabled. Your selected location must support all active settings in order to establish a connection.</string>
     <string name="direct_only_removed_title">“Direct Only” removed</string>
     <string name="direct_only_removed_first_paragraph">The DAITA sub-setting “Direct only” has been removed and simplified to avoid blocking connections. Instead, with DAITA enabled, you make this option with the multihop setting.</string>
     <string name="direct_only_removed_second_paragraph">When multihop is set to “When needed” the app might use an additional server to make sure you connect to your selected location using DAITA.</string>
@@ -595,4 +595,5 @@
     <string name="dns_settings_issues_first_paragraph">DNS settings might not go into effect immediately.</string>
     <string name="dns_settings_issues_second_paragraph">Turn off Private DNS in %s as it might interfere with Mullvad’s DNS settings.</string>
     <string name="system_network_settings">System network settings</string>
+    <string name="connected_server">Connected server</string>
 </resources>

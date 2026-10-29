@@ -4,7 +4,7 @@ import styled, { css } from 'styled-components';
 
 import { colors } from '../../../../../../../../../../foundations';
 import { TextField } from '../../../../../../../../../text-field';
-import type { TextFieldInputProps } from '../../../../../../../../../text-field/components';
+import type { TextFieldInputProps } from '../../../../../../../../../text-field/components/text-field-input-group/components';
 import { useLocationSelectorContext } from '../../../../../../../../LocationSelectorContext';
 import { useIsLocationSelected } from '../../../../../../hooks';
 import { useLocationSelectorTextFieldItemContext } from '../../../../LocationSelectorTextFieldItemContext';
@@ -17,7 +17,7 @@ export const StyledLocationSelectorTextFieldInput = styled.div`
   flex: 1;
 `;
 
-export const StyledLocationSelectorTextFieldInputInput = styled(TextField.Input)<{
+export const StyledLocationSelectorTextFieldInputInput = styled(TextField.InputGroup.Input)<{
   $selected: boolean;
 }>`
   ${({ $selected }) => {
@@ -45,7 +45,7 @@ export function LocationSelectorTextFieldInput({
   onFocus,
   ...props
 }: LocationSelectorTextFieldInputProps) {
-  const { inputRef, id, focusInsideTextField } = useLocationSelectorTextFieldItemContext();
+  const { inputRef, id, focusInsideTrigger } = useLocationSelectorTextFieldItemContext();
   const { onSelectedItemChange } = useLocationSelectorContext();
 
   const handleFocus = React.useCallback(
@@ -57,12 +57,12 @@ export function LocationSelectorTextFieldInput({
   );
 
   const selected = useIsLocationSelected(id);
-  const tabIndex = focusInsideTextField ? 0 : -1;
+  const tabIndex = focusInsideTrigger ? 0 : -1;
 
   // Hide input from screen readers until focused. If not hidden, screen
   // readers will automatically focus the input when navigating through the page,
   // triggering the change from showing entry and exit locations.
-  const ariaHidden = !focusInsideTextField;
+  const ariaHidden = !focusInsideTrigger;
 
   return (
     <StyledLocationSelectorTextFieldInput>
