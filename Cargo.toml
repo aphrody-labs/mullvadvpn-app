@@ -202,9 +202,9 @@ windows-sys = "0.61.2"
 winresource = "0.1.31"
 wmi = "0.18.1"
 zbus = "6.0.0"
-# We cannot use zerocopy "0.8.32" or above due to https://github.com/google/zerocopy/issues/2880
-# TODO: Update the version when the issue is resolved
-zerocopy = "=0.8.31"
+# Shared with the Bun workspace that embeds the daemon. Upstream pins =0.8.31 only
+# for https://github.com/google/zerocopy/issues/2880 (deny(non_ascii_idents)).
+zerocopy = "0.8.62"
 zeroize = "1.8.2"
 
 [workspace.lints.clippy]
