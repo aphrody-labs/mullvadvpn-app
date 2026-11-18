@@ -30,8 +30,11 @@ Line wrap the file at 100 chars.                                              Th
 
 #### Linux
 - Add back support for managing DNS via NetworkManager.
+- Add a build option that disables the GUI update notification in packages.
 
 ### Changed
+- The `Automatic` anti-censorship method is now faster at finding a working method. It tries
+  multiple obfuscators during the connecting state, and picks the first working one.
 - Update LWO to improved v2 protocol.
 - Remove `mullvad tunnel set daita-direct-only` command. Superseded by automatic multihop setting.
 - Improve obfuscation performance by using GotaTun. This mainly affects Shadowsocks.
