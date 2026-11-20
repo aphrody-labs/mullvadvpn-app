@@ -1,0 +1,494 @@
+//! Negotiate ephemeral peers through temporary GotaTun devices.
+//!
+//! The devices reach the config services of the relays through a userspace network stack, so no
+//! tunnel device, routes or firewall exceptions are needed. The *ingress relay* is the relay that
+//! the devices connect to directly: the only relay in singlehop, and the entry relay in multihop.
+
+use crate::{
+    CONFIG_SERVICE_PORT, DaitaSettings, EphemeralPeer, Error, request_ephemeral_peer_over_stream,
+};
+use gotatun::{
+    device::{Device, DeviceBuilder, DeviceTransports, Peer},
+    noise::TimerParams,
+    packet::{Ipv4Header, Ipv6Header, UdpHeader, WgData},
+    tun::MtuWatcher,
+    udp::{UdpTransportFactory, channel::new_udp_tun_channel},
+    x25519::StaticSecret,
+};
+use ipnetwork::IpNetwork;
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    time::Duration,
+};
+use talpid_netstack::smoltcp_network::{
+    SmoltcpHandle, SmoltcpIpRecv, SmoltcpIpSend, SmoltcpNetworkConfig, SmoltcpNetworkGuard,
+    smoltcp_network,
+};
+use talpid_types::net::wireguard::{PresharedKey, PrivateKey, PublicKey};
+use tokio::time::error::Elapsed;
+
+/// MTU of the userspace network stack. This is the lowest possible IPv4 MTU, since the path MTU may
+/// be lower than the tunnel MTU, and has not been detected yet.
+const USERSPACE_NET_MTU: u16 = 576;
+
+/// Capacity of the channels between the entry and exit devices in multihop.
+const MULTIHOP_CHANNEL_CAPACITY: usize = 100;
+
+/// A relay to negotiate an ephemeral peer with.
+pub struct Relay {
+    pub public_key: PublicKey,
+    pub endpoint: SocketAddr,
+}
+
+impl Relay {
+    fn pubkey(&self) -> gotatun::x25519::PublicKey {
+        (*self.public_key.as_bytes()).into()
+    }
+}
+
+/// The relays that the tunnel goes through.
+pub enum Relays {
+    Singlehop(Relay),
+    Multihop { entry: Relay, exit: Relay },
+}
+
+impl Relays {
+    fn ingress(&self) -> &Relay {
+        match self {
+            Relays::Singlehop(relay) => relay,
+            Relays::Multihop { entry, .. } => entry,
+        }
+    }
+}
+
+/// What to negotiate with the config services in [`negotiate_ephemeral_peers`].
+#[derive(Clone, Copy)]
+pub struct Negotiables {
+    /// Negotiate a PSK with every relay, using a post-quantum safe key exchange.
+    pub post_quantum: bool,
+    /// Request DAITA machines from the ingress relay.
+    pub daita: bool,
+}
+
+/// Parameters for [`negotiate_ephemeral_peers`].
+pub struct NegotiationConfig {
+    /// The WireGuard private key of this device.
+    pub private_key: PrivateKey,
+    /// The IPv4 address of this device in the tunnel.
+    pub tunnel_ipv4: Ipv4Addr,
+    /// The address of the config service in the tunnel.
+    pub config_service_ip: Ipv4Addr,
+    pub relays: Relays,
+    /// WireGuard timers to use with the ingress relay, if they differ from the defaults.
+    pub ingress_timer_params: Option<TimerParams>,
+    /// Time limit for the exchange with each config service. `None` only relies on
+    /// [`Self::tcp_timeout`].
+    pub timeout: Option<Duration>,
+    /// TCP timeout. See [`talpid_netstack::smoltcp_network::SmoltcpHandle::set_timeout`].
+    pub tcp_timeout: Option<Duration>,
+    /// Interval between TCP keep-alive probes. With [`Self::tcp_timeout`], this makes a connection
+    /// that receives nothing for that long fail, even while nothing is being sent. See
+    /// [`talpid_netstack::smoltcp_network::SmoltcpHandle::set_keep_alive`].
+    pub tcp_keep_alive: Option<Duration>,
+    /// Time limit for the WireGuard handshake with each relay. A relay that does not complete a
+    /// handshake in time is unreachable, so there is no point in waiting for [`Self::timeout`].
+    pub handshake_timeout: Duration,
+    /// Negotiate a different ephemeral key with the exit relay in multihop. This requires a
+    /// separate device for each relay, since a device has a single private key.
+    pub separate_exit_key: bool,
+}
+
+impl NegotiationConfig {
+    fn allowed_ip(&self) -> IpNetwork {
+        // Only allow tunnel to talk to the config service
+        IpNetwork::from(IpAddr::V4(self.config_service_ip))
+    }
+}
+
+/// Ephemeral peers negotiated by [`negotiate_ephemeral_peers`].
+pub struct NegotiatedPeers {
+    /// The private key to use with the ingress relay, and with the exit relay unless
+    /// [`Self::exit_private_key`] is set.
+    pub private_key: PrivateKey,
+    /// The private key to use with the exit relay in multihop, if it differs from
+    /// [`Self::private_key`]. See [`NegotiationConfig::separate_exit_key`].
+    pub exit_private_key: Option<PrivateKey>,
+    /// The PSK to use with the ingress relay.
+    pub ingress_psk: Option<PresharedKey>,
+    /// The PSK to use with the exit relay in multihop.
+    pub exit_psk: Option<PresharedKey>,
+    /// The DAITA settings to use with the ingress relay.
+    pub daita: Option<DaitaSettings>,
+}
+
+/// Errors from [`negotiate_ephemeral_peers`].
+#[derive(thiserror::Error, Debug)]
+pub enum NegotiationError {
+    /// A config service did not respond in time.
+    #[error("Timed out while negotiating ephemeral peer")]
+    Timeout(#[from] Elapsed),
+    /// Failed to create a GotaTun device.
+    #[error("Failed to create GotaTun device")]
+    Device(#[source] gotatun::device::Error),
+    /// Failed to initiate a handshake with a relay.
+    #[error("Failed to initiate a handshake with the relay")]
+    Handshake(#[source] gotatun::device::Error),
+    /// The exchange with a config service failed.
+    #[error("Failed to exchange ephemeral peer")]
+    Exchange(#[source] Error),
+}
+
+/// A WireGuard session with the ingress relay, which reaches the config service of the ingress
+/// relay through a userspace network stack.
+///
+/// The session can be established with [`Self::handshake`] to find out whether the relay is
+/// reachable at all, and then be reused to negotiate ephemeral peers with
+/// [`negotiate_ephemeral_peers_over`].
+pub struct IngressSession<F: UdpTransportFactory> {
+    device: Device<(F, SmoltcpIpSend, SmoltcpIpRecv)>,
+    net: SmoltcpHandle,
+    _net_guard: SmoltcpNetworkGuard,
+}
+
+impl<F: UdpTransportFactory> IngressSession<F> {
+    /// Create a device that reaches the ingress relay through `transport`. No handshake is
+    /// initiated until something is sent through the session.
+    pub async fn new(config: &NegotiationConfig, transport: F) -> Result<Self, NegotiationError> {
+        let (net, net_recv, net_send, net_guard) = userspace_net(config);
+
+        let peer =
+            ingress_peer(config, config.relays.ingress()).with_allowed_ip(config.allowed_ip());
+        let device = DeviceBuilder::new()
+            .with_udp(transport)
+            .with_ip_pair(net_send, net_recv)
+            .with_private_key(static_secret(&config.private_key))
+            .with_peer(peer)
+            .build()
+            .await
+            .map_err(NegotiationError::Device)?;
+
+        Ok(Self {
+            device,
+            net,
+            _net_guard: net_guard,
+        })
+    }
+
+    /// Complete a handshake with the ingress relay. This waits indefinitely until a handshake
+    /// arrives, and returns immediately if there's already an active session.
+    pub async fn handshake(&self) -> Result<(), NegotiationError> {
+        force_handshake(&self.device).await
+    }
+
+    /// Use [`NegotiationConfig::ingress_timer_params`] for the ingress relay.
+    async fn set_timer_params(
+        &mut self,
+        config: &NegotiationConfig,
+    ) -> Result<(), NegotiationError> {
+        let relay_pubkey = config.relays.ingress().pubkey();
+        let timer_params = config.ingress_timer_params.clone();
+        self.device
+            .modify_peer(&relay_pubkey, |peer| {
+                peer.dangerously_set_timer_params(timer_params)
+            })
+            .await
+            .map(|_| ())
+            .map_err(NegotiationError::Device)
+    }
+
+    /// Stop the device.
+    pub async fn stop(self) {
+        self.device.stop().await
+    }
+}
+
+/// Negotiate ephemeral peers with the relays in `config`, using a new ephemeral key. In multihop,
+/// the exit relay gets a key of its own if [`NegotiationConfig::separate_exit_key`] is set.
+///
+/// The ingress relay is reached through a new [`IngressSession`] over `ingress_transport`. See
+/// [`negotiate_ephemeral_peers_over`].
+pub async fn negotiate_ephemeral_peers<F: UdpTransportFactory>(
+    config: &NegotiationConfig,
+    negotiate: Negotiables,
+    ingress_transport: impl Fn(&PublicKey) -> F,
+) -> Result<NegotiatedPeers, NegotiationError> {
+    let ingress =
+        IngressSession::new(config, ingress_transport(&config.private_key.public_key())).await?;
+    negotiate_ephemeral_peers_over(config, negotiate, ingress, ingress_transport).await
+}
+
+/// Negotiate ephemeral peers with the relays in `config`, using a new ephemeral key. In multihop,
+/// the exit relay gets a key of its own if [`NegotiationConfig::separate_exit_key`] is set.
+///
+/// The ingress peer is negotiated through `ingress`, which is stopped when this returns. In
+/// multihop, the exit peer is then negotiated through the entry relay, using the negotiated entry
+/// peer, by a device that reaches the entry relay through the UDP transports that
+/// `ingress_transport` creates for a device with the given public key.
+///
+/// For each relay, the WireGuard handshake takes at most [`NegotiationConfig::handshake_timeout`],
+/// and the exchange with its config service is then limited by [`NegotiationConfig::timeout`] and
+/// [`NegotiationConfig::tcp_timeout`].
+pub async fn negotiate_ephemeral_peers_over<F: UdpTransportFactory, G: UdpTransportFactory>(
+    config: &NegotiationConfig,
+    negotiate: Negotiables,
+    ingress: IngressSession<F>,
+    ingress_transport: impl Fn(&PublicKey) -> G,
+) -> Result<NegotiatedPeers, NegotiationError> {
+    let ephemeral_key = PrivateKey::new_from_random();
+
+    log::debug!(
+        "Negotiating ephemeral peer with the ingress relay {} (pq={}, daita={})",
+        config.relays.ingress().endpoint,
+        negotiate.post_quantum,
+        negotiate.daita
+    );
+    let ingress_peer = negotiate_with_ingress(config, negotiate, ingress, &ephemeral_key).await?;
+    log::debug!(
+        "Negotiated ephemeral peer with the ingress relay (psk={}, daita={})",
+        ingress_peer.psk.is_some(),
+        ingress_peer.daita.is_some()
+    );
+
+    let (exit_private_key, exit_psk) = match &config.relays {
+        Relays::Singlehop(_) => (None, None),
+        Relays::Multihop { entry, exit } => {
+            let exit_private_key = config.separate_exit_key.then(PrivateKey::new_from_random);
+            log::debug!(
+                "Negotiating ephemeral peer with the exit relay {}",
+                exit.endpoint
+            );
+            let exit_peer = negotiate_through_entry(
+                config,
+                negotiate,
+                &ingress_transport,
+                entry,
+                &ephemeral_key,
+                ingress_peer.psk.as_ref(),
+                exit,
+                exit_private_key.as_ref().unwrap_or(&ephemeral_key),
+            )
+            .await?;
+            log::debug!(
+                "Negotiated ephemeral peer with the exit relay (psk={})",
+                exit_peer.psk.is_some()
+            );
+            (exit_private_key, exit_peer.psk)
+        }
+    };
+
+    Ok(NegotiatedPeers {
+        private_key: ephemeral_key,
+        exit_private_key,
+        ingress_psk: ingress_peer.psk,
+        exit_psk,
+        daita: ingress_peer.daita,
+    })
+}
+
+/// Negotiate an ephemeral peer with the ingress relay through `ingress`, and stop it.
+async fn negotiate_with_ingress<F: UdpTransportFactory>(
+    config: &NegotiationConfig,
+    negotiate: Negotiables,
+    mut ingress: IngressSession<F>,
+    ephemeral_key: &PrivateKey,
+) -> Result<EphemeralPeer, NegotiationError> {
+    let negotiate = async {
+        ingress.set_timer_params(config).await?;
+        handshake(&ingress.device, config.handshake_timeout).await?;
+        request_ephemeral_peer_through(ingress.net.clone(), config, ephemeral_key, negotiate).await
+    };
+
+    let result = negotiate.await;
+    ingress.stop().await;
+    result
+}
+
+/// Negotiate an ephemeral peer with the exit relay, through the entry relay.
+///
+/// The entry device uses `entry_key` and `entry_psk`, which were negotiated with the entry relay.
+/// The exit device uses the private key of this device, and requests an ephemeral peer for
+/// `exit_key`.
+#[expect(clippy::too_many_arguments)]
+async fn negotiate_through_entry<F: UdpTransportFactory>(
+    config: &NegotiationConfig,
+    negotiate: Negotiables,
+    ingress_transport: impl Fn(&PublicKey) -> F,
+    entry: &Relay,
+    entry_key: &PrivateKey,
+    entry_psk: Option<&PresharedKey>,
+    exit: &Relay,
+    exit_key: &PrivateKey,
+) -> Result<EphemeralPeer, NegotiationError> {
+    let (net, net_recv, net_send, _net_guard) = userspace_net(config);
+    let (entry_ip_send, entry_ip_recv, exit_udp) = new_udp_tun_channel(
+        MULTIHOP_CHANNEL_CAPACITY,
+        config.tunnel_ipv4,
+        // The exit relay is always reached over IPv4, so the exit device never sends from an IPv6
+        // address.
+        Ipv6Addr::UNSPECIFIED,
+        entry_mtu(exit.endpoint),
+    );
+
+    let exit_peer = Peer::new(exit.pubkey())
+        .with_endpoint(exit.endpoint)
+        .with_allowed_ip(config.allowed_ip());
+    let exit_device = DeviceBuilder::new()
+        .with_udp(exit_udp)
+        .with_ip_pair(net_send, net_recv)
+        .with_private_key(static_secret(&config.private_key))
+        .with_peer(exit_peer)
+        .build()
+        .await
+        .map_err(NegotiationError::Device)?;
+
+    let mut entry_peer =
+        ingress_peer(config, entry).with_allowed_ip(IpNetwork::from(exit.endpoint.ip()));
+    if let Some(psk) = entry_psk {
+        entry_peer = entry_peer.with_preshared_key(*psk.as_bytes());
+    }
+    let entry_device = match DeviceBuilder::new()
+        .with_udp(ingress_transport(&entry_key.public_key()))
+        .with_ip_pair(entry_ip_send, entry_ip_recv)
+        .with_private_key(static_secret(entry_key))
+        .with_peer(entry_peer)
+        .build()
+        .await
+    {
+        Ok(device) => device,
+        Err(error) => {
+            exit_device.stop().await;
+            return Err(NegotiationError::Device(error));
+        }
+    };
+
+    // DAITA is only used with the ingress relay.
+    let negotiate = Negotiables {
+        daita: false,
+        ..negotiate
+    };
+
+    let handshake_result = async {
+        // The entry device uses a new key, so it needs a new handshake
+        handshake(&entry_device, config.handshake_timeout)
+            .await
+            .inspect_err(|_| log::debug!("Failed to complete a handshake with the entry relay"))?;
+        handshake(&exit_device, config.handshake_timeout)
+            .await
+            .inspect_err(|_| log::debug!("Failed to complete a handshake with the exit relay"))
+    }
+    .await;
+    if let Err(err) = handshake_result {
+        entry_device.stop().await;
+        exit_device.stop().await;
+        return Err(err);
+    }
+
+    let result = request_ephemeral_peer_through(net, config, exit_key, negotiate).await;
+    entry_device.stop().await;
+    exit_device.stop().await;
+    result
+}
+
+/// Complete a handshake between `device` and its only peer, or fail with
+/// [`NegotiationError::Timeout`] if that takes longer than `timeout`.
+async fn handshake(
+    device: &Device<impl DeviceTransports>,
+    timeout: Duration,
+) -> Result<(), NegotiationError> {
+    tokio::time::timeout(timeout, force_handshake(device))
+        .await
+        .inspect_err(|_| {
+            log::debug!("No handshake with the relay within {timeout:?}");
+        })
+        .map_err(NegotiationError::Timeout)?
+}
+
+/// Complete a handshake between `device` and its only peer, however long that takes.
+async fn force_handshake(device: &Device<impl DeviceTransports>) -> Result<(), NegotiationError> {
+    let pubkey = device
+        .peers()
+        .await
+        .first()
+        .expect("has a peer")
+        .peer
+        .public_key;
+    device
+        .force_handshake(&pubkey)
+        .await
+        .map_err(NegotiationError::Handshake)
+}
+
+/// Request an ephemeral peer from the config service that is reached through `net`.
+async fn request_ephemeral_peer_through(
+    net: SmoltcpHandle,
+    config: &NegotiationConfig,
+    ephemeral_key: &PrivateKey,
+    negotiate: Negotiables,
+) -> Result<EphemeralPeer, NegotiationError> {
+    let config_service = SocketAddr::new(IpAddr::V4(config.config_service_ip), CONFIG_SERVICE_PORT);
+    let exchange = async {
+        let stream = net
+            .set_timeout(config.tcp_timeout)
+            .set_keep_alive(config.tcp_keep_alive)
+            .log_stats()
+            .tcp_connect(config_service)
+            .await
+            .map_err(Error::TcpSocketError)?;
+        request_ephemeral_peer_over_stream(
+            stream,
+            config.private_key.public_key(),
+            ephemeral_key.public_key(),
+            negotiate.post_quantum,
+            negotiate.daita,
+        )
+        .await
+    };
+
+    let result = match config.timeout {
+        Some(timeout) => tokio::time::timeout(timeout, exchange)
+            .await
+            .map_err(NegotiationError::Timeout)?,
+        None => exchange.await,
+    };
+    result.map_err(NegotiationError::Exchange)
+}
+
+/// A userspace network stack that uses the tunnel address of this device.
+fn userspace_net(
+    config: &NegotiationConfig,
+) -> (
+    SmoltcpHandle,
+    SmoltcpIpRecv,
+    SmoltcpIpSend,
+    SmoltcpNetworkGuard,
+) {
+    smoltcp_network(SmoltcpNetworkConfig {
+        ipv4_addr: config.tunnel_ipv4,
+        ipv6_addr: None,
+        mtu: USERSPACE_NET_MTU,
+    })
+}
+
+/// A peer for `relay`, which is the ingress relay.
+fn ingress_peer(config: &NegotiationConfig, relay: &Relay) -> Peer {
+    let peer = Peer::new(relay.pubkey()).with_endpoint(relay.endpoint);
+    match &config.ingress_timer_params {
+        Some(timer_params) => peer.dangerously_with_timer_params(timer_params.clone()),
+        None => peer,
+    }
+}
+
+fn static_secret(private_key: &PrivateKey) -> StaticSecret {
+    StaticSecret::from(private_key.to_bytes())
+}
+
+/// MTU of the entry device, which carries the packets that the exit device sends to `exit_endpoint`.
+fn entry_mtu(exit_endpoint: SocketAddr) -> MtuWatcher {
+    let overhead = match exit_endpoint {
+        SocketAddr::V4(..) => Ipv4Header::LEN + UdpHeader::LEN + WgData::OVERHEAD,
+        SocketAddr::V6(..) => Ipv6Header::LEN + UdpHeader::LEN + WgData::OVERHEAD,
+    };
+    MtuWatcher::new(USERSPACE_NET_MTU)
+        .increase(overhead as u16)
+        .expect("the userspace network MTU leaves room for the multihop overhead")
+}

@@ -1,0 +1,30 @@
+[package]
+name = "mullvad-relay-selector"
+edition.workspace = true
+rust-version.workspace = true
+description = "Mullvad VPN relay selector"
+repository.workspace = true
+license.workspace = true
+
+[dependencies]
+either = { workspace = true }
+ipnetwork = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+mullvad-types.workspace = true
+rand = { workspace = true }
+talpid-types.workspace = true
+thiserror = { workspace = true }
+vec1 = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true, features = ["yaml"] }
+proptest = { workspace = true }
+serde_json = { workspace = true }
+vec1 = { workspace = true }
+
+[features]
+default = []
+
+[lints]
+workspace = true

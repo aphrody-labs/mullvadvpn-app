@@ -1,0 +1,69 @@
+package net.mullvad.mullvadvpn.lib.grpc.util
+
+import co.touchlab.kermit.Logger
+import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Proxy
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import net.mullvad.mullvadvpn.lib.grpc.GrpcConnectivityState
+import okhttp3.Call
+import okhttp3.Connection
+import okhttp3.Dispatcher
+import okhttp3.EventListener
+import okhttp3.Protocol
+import okhttp3.internal.http2.StreamResetException
+
+internal class GrpcEventListener : EventListener() {
+    private val _connectionState =
+        MutableStateFlow<GrpcConnectivityState>(GrpcConnectivityState.Closed)
+    val connectionState: StateFlow<GrpcConnectivityState> = _connectionState.asStateFlow()
+
+    override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
+        _connectionState.update { GrpcConnectivityState.Connecting }
+    }
+
+    override fun connectionAcquired(call: Call, connection: Connection) {
+        _connectionState.update { GrpcConnectivityState.Ready }
+    }
+
+    override fun connectFailed(
+        call: Call,
+        inetSocketAddress: InetSocketAddress,
+        proxy: Proxy,
+        protocol: Protocol?,
+        ioe: IOException,
+    ) {
+        _connectionState.update { GrpcConnectivityState.Failed }
+    }
+
+    override fun callFailed(call: Call, ioe: IOException) {
+        // A call can be reset due to the app cancelling the call, in that case we should just
+        // ignore it since it most likely that the daemon connection is still alive.
+        if (call.isCanceled() || ioe is StreamResetException) {
+            Logger.d("Call ${call.request().url} failed due to being cancelled or reset")
+            return
+        }
+
+        _connectionState.update { GrpcConnectivityState.Failed }
+    }
+
+    // Only invoked when a call can't be executed immediately because the dispatcher's
+    // maxRequests or maxRequestsPerHost limit has been reached.
+    override fun dispatcherQueueStart(call: Call, dispatcher: Dispatcher) {
+        fun Call.rpcName(): String = request().url.pathSegments.last()
+
+        val runningCalls = dispatcher.runningCalls().map { it.rpcName() }
+
+        Logger.w(
+            "gRPC call ${call.rpcName()} queued (running=${runningCalls.size}, " +
+                "queue=${dispatcher.queuedCallsCount()}). Running: $runningCalls",
+        )
+    }
+
+    fun setClosedConnectionState() {
+        _connectionState.update { GrpcConnectivityState.Closed }
+    }
+}

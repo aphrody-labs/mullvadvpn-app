@@ -1,0 +1,111 @@
+import React from 'react';
+
+import { LocationType } from '../../../features/locations/types';
+import useActions from '../../../lib/actionsHook';
+import type { LocationSelectorItemType } from '../../../lib/components/location-selector/types';
+import { useSelector } from '../../../redux/store';
+import userInterface from '../../../redux/userinterface/actions';
+import { useLocationInvalidReason } from './hooks';
+
+type TransitionState = 'idle' | 'transitioningOut' | 'transitioningIn';
+
+type SelectLocationViewContextProps = Omit<SelectLocationViewProviderProps, 'children'> & {
+  locationType: LocationType;
+  setLocationType: (locationType: LocationType) => void;
+  searchTerm: string;
+  setSearchTerm: (value: string) => void;
+  isolatedItem: LocationSelectorItemType | undefined;
+  setIsolatedItem: (value: LocationSelectorItemType | undefined) => void;
+  isLocationSelectorExpanded: boolean;
+  setIsLocationSelectorExpanded: (value: boolean) => void;
+  transitionState: TransitionState;
+  setTransitionState: (value: TransitionState) => void;
+  invalidReason: {
+    entry: string | undefined;
+    exit: string | undefined;
+  };
+};
+
+const SelectLocationViewContext = React.createContext<SelectLocationViewContextProps | undefined>(
+  undefined,
+);
+
+export const useSelectLocationViewContext = (): SelectLocationViewContextProps => {
+  const context = React.useContext(SelectLocationViewContext);
+  if (!context) {
+    throw new Error(
+      'useSelectLocationViewContext must be used within a SelectLocationViewProvider',
+    );
+  }
+  return context;
+};
+
+type SelectLocationViewProviderProps = React.PropsWithChildren;
+
+export function SelectLocationViewProvider({ children }: SelectLocationViewProviderProps) {
+  const { setSelectLocationView } = useActions(userInterface);
+  const locationTypeSelector = useSelector((state) => state.userInterface.selectLocationView);
+
+  const [isolatedItem, setIsolatedItem] = React.useState<LocationSelectorItemType | undefined>(
+    undefined,
+  );
+
+  const [searchTerm, stateSetSearchTerm] = React.useState('');
+  const setSearchTerm = React.useCallback((value: string) => {
+    React.startTransition(() => {
+      stateSetSearchTerm(value);
+    });
+  }, []);
+
+  const [isLocationSelectorExpanded, setIsLocationSelectorExpanded] = React.useState(true);
+  const [transitionState, setTransitionState] = React.useState<TransitionState>('idle');
+
+  const setLocationType = React.useCallback(
+    (value: LocationType) => {
+      React.startTransition(() => {
+        setSelectLocationView(value);
+      });
+    },
+    [setSelectLocationView],
+  );
+
+  const invalidReasonEntry = useLocationInvalidReason('entry');
+  const invalidReasonExit = useLocationInvalidReason('exit');
+
+  const value = React.useMemo(
+    () => ({
+      locationType: locationTypeSelector,
+      setLocationType,
+      searchTerm,
+      setSearchTerm,
+      isolatedItem,
+      setIsolatedItem,
+      isLocationSelectorExpanded,
+      setIsLocationSelectorExpanded,
+      transitionState,
+      setTransitionState,
+      invalidReason: {
+        entry: invalidReasonEntry,
+        exit: invalidReasonExit,
+      },
+    }),
+    [
+      locationTypeSelector,
+      setLocationType,
+      searchTerm,
+      setSearchTerm,
+      isolatedItem,
+      setIsolatedItem,
+      isLocationSelectorExpanded,
+      transitionState,
+      invalidReasonEntry,
+      invalidReasonExit,
+    ],
+  );
+
+  return (
+    <SelectLocationViewContext.Provider value={value}>
+      {children}
+    </SelectLocationViewContext.Provider>
+  );
+}

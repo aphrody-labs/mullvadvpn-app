@@ -1,0 +1,74 @@
+[package]
+name = "mullvad-api"
+edition.workspace = true
+rust-version.workspace = true
+description = "Mullvad VPN API clients. Providing an interface to query our infrastructure for information."
+repository.workspace = true
+license.workspace = true
+
+[lib]
+bench = false
+crate-type = ["rlib", "staticlib"]
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+domain-fronting = "0.2.0"
+duplicate.workspace = true
+futures = { workspace = true }
+hex = { workspace = true }
+http.workspace = true
+http-body-util = "0.1.2"
+hyper = { version = "1.8.1", features = ["client", "http1"] }
+hyper-util = { workspace = true }
+ipnetwork = { workspace = true }
+libc = "0.2"
+mullvad-api-constants.workspace = true
+mullvad-encrypted-dns-proxy.workspace = true
+mullvad-fs.workspace = true
+mullvad-tls-client.workspace = true
+mullvad-types.workspace = true
+mullvad-version.workspace = true
+safelog.workspace = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+shadowsocks = { workspace = true, features = ["stream-cipher"] }
+sigsum = { workspace = true }
+talpid-error.workspace = true
+talpid-time.workspace = true
+talpid-types.workspace = true
+thiserror = { workspace = true }
+tokio = { workspace = true, features = [
+  "fs",
+  "io-std",
+  "io-util",
+  "macros",
+  "net",
+  "rt-multi-thread",
+  "time",
+] }
+tokio-rustls = { version = "0.26.0", default-features = false, features = [
+  "aws-lc-rs",
+  "logging",
+] }
+tokio-socks = "0.5.1"
+tracing = { workspace = true }
+vec1 = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+insta.workspace = true
+mockito = { workspace = true }
+talpid-time = { workspace = true, features = ["test"] }
+tokio = { workspace = true, features = ["test-util", "time"] }
+
+[target.'cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))'.dependencies]
+mullvad-update.workspace = true
+
+[features]
+# Allow the API server to use to be configured via MULLVAD_API_HOST and MULLVAD_API_ADDR.
+api-override = []
+
+[lints]
+workspace = true

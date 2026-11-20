@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+# This script prepares for a release. Run it with the release version as the first argument and it
+# will update version numbers, commit and add a signed tag.
+
+set -eu
+
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+cd "$SCRIPT_DIR"
+
+SKIP_BASELINE="no"
+
+for argument in "$@"; do
+    case "$argument" in
+        --skip-baseline)
+            SKIP_BASELINE="yes"
+            ;;
+        -*)
+            echo "Unknown option \"$argument\""
+            exit 1
+            ;;
+        *)
+            PRODUCT_VERSION="$argument"
+            ;;
+    esac
+done
+
+if [[ -z ${PRODUCT_VERSION+x} ]]; then
+    echo "Please give the release version as an argument to this script."
+    echo "For example: '2018.1-beta3' for a beta release, or '2018.6' for a stable one."
+    exit 1
+fi
+
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Dirty working directory! Will not accept that for an official release."
+    exit 1
+fi
+
+./check-changelog.sh "$PRODUCT_VERSION"
+
+if [[ $SKIP_BASELINE == "yes" ]]; then
+    echo "Skipping baseline file generation due to skip baseline argument"
+elif [[ $PRODUCT_VERSION == *"beta"* || $PRODUCT_VERSION == *"alpha"* ]]; then
+    echo "Skipping baseline file generation for beta/alpha release"
+else
+    echo "### Generating new baseline file ###"
+    ../gradlew -p ../ generatePlayProdReleaseBaselineProfile
+    if git diff --quiet ../app/src/main/baseline-prof.txt; then
+        echo "Info: Baseline file unchanged"
+    else
+        git commit -m "Update baseline file" \
+        ../app/src/main/baseline-prof.txt
+    fi
+fi
+
+../../scripts/commit-relay-list "$PRODUCT_VERSION"
+echo ""
+
+echo "### Generating version information ###"
+echo "$PRODUCT_VERSION" > ../../dist-assets/android-version-name.txt
+ANDROID_VERSION="$PRODUCT_VERSION" cargo run -q --bin mullvad-version versionCode > \
+    ../../dist-assets/android-version-code.txt
+if git diff --quiet ../../dist-assets/android-version-*; then
+    echo "Error: Version information unchanged."
+    exit 1
+fi
+git commit -S -m "Update android app version to $PRODUCT_VERSION" \
+    ../../dist-assets/android-version-name.txt \
+    ../../dist-assets/android-version-code.txt
+echo ""
+
+echo "### Tagging release as android/$PRODUCT_VERSION ###"
+git tag -s "android/$PRODUCT_VERSION" -m "android/$PRODUCT_VERSION"
+echo ""
+
+echo "===================================================="
+echo "| DONE preparing for a release!                    |"
+echo "|    Now push the tag created by this script       |"
+echo "|    after you have verified it is correct:        |"
+echo "|        $ git push origin android/$PRODUCT_VERSION "
+echo "===================================================="

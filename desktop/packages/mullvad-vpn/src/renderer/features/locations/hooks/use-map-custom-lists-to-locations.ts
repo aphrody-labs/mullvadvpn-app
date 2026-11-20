@@ -1,0 +1,104 @@
+import type { RelayLocation } from '../../../../shared/daemon-rpc-types';
+import { useSettingsCustomLists } from '../../../redux/hooks';
+import {
+  type CountryLocation,
+  type CustomListLocation,
+  DisabledReason,
+  type GeographicalLocation,
+} from '../types';
+import {
+  createCountryLocationMap,
+  isCustomListDisabled,
+  isLocationSelected,
+  searchMatchesLocation,
+} from '../utils';
+
+export function useMapCustomListsToLocations(
+  searchedCountryLocations: CountryLocation[],
+  filteredCountryLocations: CountryLocation[],
+  searchTerm: string,
+  selectedLocation?: RelayLocation,
+): CustomListLocation[] {
+  const { customLists } = useSettingsCustomLists();
+
+  const customListLocations: CustomListLocation[] = customLists.map((customList) => {
+    const customListMatchesSearch = searchMatchesLocation(customList.name, searchTerm);
+    // If the custom list name matches search, show all locations it contains.
+    const locations = customListMatchesSearch ? filteredCountryLocations : searchedCountryLocations;
+    const locationMap = createCountryLocationMap(locations);
+
+    // Get all ids of locations that are in the custom list
+    const customListLocationIds = customList.locations.flatMap((location) => {
+      if ('hostname' in location) {
+        return location.hostname;
+      }
+      if ('city' in location) {
+        return location.city;
+      }
+
+      return location.country;
+    });
+
+    // Pick the locations from the map that are in the custom list, and add custom list details to them
+    const customListGeographicalLocations: GeographicalLocation[] = [];
+    let childLocationExpandedOrSelected = false;
+    for (const id of customListLocationIds) {
+      const location = locationMap.get(id);
+      if (!location) {
+        continue;
+      }
+
+      const customListGeographicalLocation = {
+        ...location,
+        details: {
+          ...location.details,
+          customList: customList.id,
+        },
+      } as GeographicalLocation;
+
+      customListGeographicalLocations.push(customListGeographicalLocation);
+      if (customListGeographicalLocation.expanded || customListGeographicalLocation.selected) {
+        childLocationExpandedOrSelected = true;
+      }
+    }
+
+    // Expand if one of the child locations are expanded or selected, or if the custom list itself does
+    // not match the search, since that means one of the children must have matched.
+    const customListExpanded = !customListMatchesSearch || childLocationExpandedOrSelected;
+
+    const details = {
+      customList: customList.id,
+    };
+
+    const disabledReason = isCustomListDisabled(details, customListGeographicalLocations);
+    const needsOtherEntry =
+      customListGeographicalLocations.length > 0 &&
+      customListGeographicalLocations.every((location) => location.needsOtherEntry);
+
+    return {
+      type: 'customList',
+      label: customList.name,
+      searchText: customList.name.toLowerCase(),
+      details,
+      disabled: disabledReason !== undefined,
+      disabledReason,
+      locations: customListGeographicalLocations,
+      active: disabledReason !== DisabledReason.inactive,
+      expanded: customListExpanded,
+      selected: isLocationSelected(details, selectedLocation),
+      needsOtherEntry,
+    };
+  });
+
+  if (searchTerm.length > 0) {
+    return customListLocations.filter((customList) => {
+      if (searchMatchesLocation(customList.label, searchTerm)) {
+        return true;
+      }
+
+      return customList.locations.length > 0;
+    });
+  }
+
+  return customListLocations;
+}

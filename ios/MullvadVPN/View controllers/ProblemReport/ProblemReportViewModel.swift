@@ -1,0 +1,128 @@
+// This Source Code Form is subject to the terms of the GPLv3 License.
+// You can obtain a copy of the license at https://www.gnu.org/licenses/gpl-3.0.en.html.
+//
+// This file incorporates work covered by the following copyright and
+// permission notice:
+//
+//   Copyright (c) Mullvad VPN AB. All rights reserved.
+//
+// SPDX-License-Identifier: GPL-3.0-only
+
+import SwiftUI
+
+@MainActor
+@Observable final class ProblemReportViewModel {
+    enum ModalState: Identifiable {
+        case sending
+        case success
+        case failure
+
+        var id: ModalState { self }
+    }
+
+    // Actions the user can perform in the event of failure
+    enum PostFailureAction {
+        case edit
+        case viewLogs
+        case retry
+    }
+
+    var email: String = ""
+    var message: String = ""
+    var includeAccountTokenInLogs: Bool = false
+
+    var modalState: ModalState?
+    var isEditingMessage: Bool = false
+    var logText: String?
+    var showLogs: Binding<Bool>!
+    var alert: MullvadAlert?
+
+    let interactor: ProblemReportInteractorProtocol?
+
+    init(interactor: ProblemReportInteractorProtocol? = nil) {
+        self.interactor = interactor
+        showLogs = Binding<Bool>(
+            get: { self.logText != nil },
+            set: { if !$0 { self.logText = nil } }
+        )
+    }
+
+    func prepareForReuse() {
+        modalState = nil
+    }
+
+    func doShowLog() {
+        Task {
+            self.logText = await interactor?.fetchReportString()
+        }
+    }
+
+    var canSend: Bool {
+        !message.isEmpty
+    }
+
+    var showAccountTokenNotice: Bool {
+        interactor?.isUserLoggedIn() ?? false
+    }
+
+    func submitForm() {
+        if email.isEmpty {
+            alert = MullvadAlert(
+                type: .warning,
+                messages: [
+                    """
+                    You are about to send the problem report without a way \
+                    for us to get back to you. If you want an answer to your \
+                    report you will have to enter an email address.
+                    """
+                ],
+                actions: [
+                    .init(
+                        type: .destructivePrimary,
+                        title: "Send anyway"
+                    ) {
+                        [weak self] in
+                        self?.alert = nil
+                        self?.doSend()
+                    },
+                    .init(
+                        type: .primary,
+                        title: "Cancel"
+                    ) { [weak self] in
+                        self?.alert = nil
+                    },
+                ]
+            )
+        } else {
+            doSend()
+        }
+    }
+
+    private func doSend() {
+        modalState = .sending
+        Task { [self] in
+            do {
+                try await interactor?.sendReport(
+                    email: email,
+                    message: message,
+                    includeAccountTokenInLogs: includeAccountTokenInLogs
+                )
+                modalState = .success
+                message = ""
+            } catch {
+                modalState = .failure
+            }
+        }
+    }
+
+    func doPostFailureAction(_ action: PostFailureAction) {
+        switch action {
+        case .edit:
+            modalState = nil
+        case .viewLogs:
+            doShowLog()
+        case .retry:
+            doSend()
+        }
+    }
+}

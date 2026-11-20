@@ -1,0 +1,59 @@
+import { AnimatePresence, type AnimatePresenceProps, motion } from 'motion/react';
+import styled from 'styled-components';
+
+import { colors, durationTokens, Radius, spacings } from '../../../../foundations';
+import { useLocationSelectorContext } from '../../LocationSelectorContext';
+import type { LocationSelectorVariant } from '../../types';
+import { LocationSelectorLine } from '../location-selector-line';
+import {
+  LocationSelectorButtonItem,
+  LocationSelectorTextFieldItem,
+  LocationSelectorTrailingButton,
+} from './components';
+
+export type LocationSelectorItemsProps = AnimatePresenceProps & React.PropsWithChildren;
+
+export const StyledLocationSelectorItems = styled(motion.div)<{
+  $variant?: LocationSelectorVariant;
+}>`
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  border-radius: ${Radius.radius16};
+  padding: ${spacings.tiny};
+  gap: ${spacings.tiny};
+`;
+
+function LocationSelectorItems({ children }: LocationSelectorItemsProps) {
+  const { expanded, variant } = useLocationSelectorContext();
+
+  return (
+    <StyledLocationSelectorItems
+      layout="size"
+      $variant={variant}
+      initial={false}
+      animate={{
+        backgroundColor: variant === 'primary' ? colors.darkBlue : colors.darkerBlue10,
+      }}
+      transition={{
+        layout: { duration: durationTokens.normal, ease: 'easeOut' },
+        backgroundColor: { duration: durationTokens.fast, ease: 'linear' },
+      }}>
+      <LocationSelectorLine
+        $visible={expanded}
+        layout
+        transition={{ duration: durationTokens.normal, ease: 'easeOut' }}
+      />
+      <AnimatePresence mode="popLayout">{children}</AnimatePresence>
+    </StyledLocationSelectorItems>
+  );
+}
+
+const LocationSelectorItemsNamespace = Object.assign(LocationSelectorItems, {
+  TextFieldItem: LocationSelectorTextFieldItem,
+  TrailingButton: LocationSelectorTrailingButton,
+  ButtonItem: LocationSelectorButtonItem,
+});
+
+export { LocationSelectorItemsNamespace as LocationSelectorItems };

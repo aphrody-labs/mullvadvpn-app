@@ -1,0 +1,55 @@
+[package]
+name = "mullvad-cli"
+edition.workspace = true
+rust-version.workspace = true
+description = "Manage the Mullvad VPN daemon via a convenient CLI"
+repository.workspace = true
+license.workspace = true
+
+[package.metadata.winresource]
+ProductName = "Mullvad VPN"
+CompanyName = "Mullvad VPN AB"
+LegalCopyright = "(c) 2026 Mullvad VPN AB"
+InternalName = "mullvad-cli"
+OriginalFilename = "mullvad.exe"
+
+[[bin]]
+name = "mullvad"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+futures = { workspace = true }
+ipnetwork = { workspace = true }
+itertools = { workspace = true }
+mullvad-management-interface.workspace = true
+mullvad-types = { workspace = true, features = ["clap"] }
+mullvad-version.workspace = true
+natord = "1.0.9"
+serde = { workspace = true }
+serde_json = { workspace = true }
+talpid-types.workspace = true
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["fs", "macros", "rt-multi-thread"] }
+vec1 = { workspace = true }
+
+[build-dependencies]
+mullvad-version.workspace = true
+winresource.workspace = true
+
+[target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
+clap_complete = { version = "4.4.8" }
+clap_complete_nushell = "4.6.2"
+nix = { workspace = true, features = ["signal"] }
+
+[features]
+custom-vpn = [
+  "mullvad-management-interface/custom-vpn",
+  "mullvad-types/custom-vpn",
+  "talpid-types/custom-vpn"
+]
+
+[lints]
+workspace = true

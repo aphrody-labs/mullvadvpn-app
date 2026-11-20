@@ -1,0 +1,38 @@
+---
+name: Code Owner Approval
+description: Ensure that someone from each team that owns code changed in the PR has approved the PR
+on:
+  # Trigger on both changes to the PR content and new/changed reviews. Both of these can affect
+  # whether the PR has the required approvals.
+  pull_request:
+  pull_request_review:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  check-code-owner-approvals:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      # Required to write a custom commit status with createCommitStatus
+      statuses: write
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+
+      - run: |
+          npm ci
+          npm run build
+        working-directory: .github/actions/code-owner-approval
+
+      - name: Check code owner approvals
+        uses: ./.github/actions/code-owner-approval
+        with:
+          # Requires a token with read access to the "Members" scope under organization,
+          # and read access to the "Pull request" scope under the repository.
+          # and write access to "Commit statuses" under the repository.
+          github-token: ${{ secrets.CODE_OWNERSHIP_CI_TOKEN }}

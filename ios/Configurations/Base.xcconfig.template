@@ -1,0 +1,37 @@
+#include "Version.xcconfig"
+#include "Api.xcconfig"
+
+// Development team
+DEVELOPMENT_TEAM = CKG9MXH72F
+
+// Product display name
+DISPLAY_NAME = Mullvad VPN
+
+// Bundle ID
+APPLICATION_IDENTIFIER[sdk=iphone*] = net.mullvad.MullvadVPN
+APPLICATION_IDENTIFIER[sdk=appletv*] = net.mullvad.MullvadVPNTvOS
+
+// Shared container security group ID
+SECURITY_GROUP_IDENTIFIER[sdk=iphone*] = group.net.mullvad.MullvadVPN
+
+SECURITY_GROUP_IDENTIFIER[sdk=appletv*] = group.net.mullvad.MullvadVPNTvOS
+
+// Code signing style
+// Possible values: Manual or Automatic
+CODE_SIGN_STYLE = Manual
+
+// Code signing identity
+CODE_SIGN_IDENTITY[config=Debug] = Apple Development
+CODE_SIGN_IDENTITY[config=Staging] = Apple Development
+CODE_SIGN_IDENTITY[config=MockRelease] = Apple Development
+CODE_SIGN_IDENTITY[config=Release] = Apple Distribution
+
+// Flag used to conditionally show features that are in development
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=Debug] = DEBUG NEVER_IN_PRODUCTION
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=Staging] = DEBUG NEVER_IN_PRODUCTION
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=MockRelease] =
+SWIFT_ACTIVE_COMPILATION_CONDITIONS[config=Release] =
+
+// This must be set so that `xcrun` and `xcodebuild` do not create stray cache
+// directories in $(PROJECT_DIR)
+CCHROOT=$(CACHE_ROOT)/../..

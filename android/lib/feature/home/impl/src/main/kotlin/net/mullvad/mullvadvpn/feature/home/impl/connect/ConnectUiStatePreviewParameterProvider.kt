@@ -1,0 +1,77 @@
+package net.mullvad.mullvadvpn.feature.home.impl.connect
+
+import androidx.compose.ui.tooling.preview.PreviewParameterProvider
+import java.net.InetAddress
+import net.mullvad.mullvadvpn.feature.home.impl.TunnelStatePreviewData
+import net.mullvad.mullvadvpn.lib.model.ActionAfterDisconnect
+import net.mullvad.mullvadvpn.lib.model.ConnectionPath
+import net.mullvad.mullvadvpn.lib.model.GeoIpLocation
+import net.mullvad.mullvadvpn.lib.model.GeoLocationId
+import net.mullvad.mullvadvpn.lib.model.InAppNotification
+
+class ConnectUiStatePreviewParameterProvider : PreviewParameterProvider<ConnectUiState> {
+    override val values = sequenceOf(ConnectUiState.INITIAL) + otherStates
+}
+
+private val otherStates =
+    sequenceOf(
+            TunnelStatePreviewData.generateConnectedState(
+                featureIndicators = 8,
+                quantumResistant = true,
+            ),
+            TunnelStatePreviewData.generateDisconnectedState(),
+            TunnelStatePreviewData.generateConnectingState(
+                featureIndicators = 4,
+                quantumResistant = false,
+            ),
+            TunnelStatePreviewData.generateDisconnectingState(
+                actionAfterDisconnect = ActionAfterDisconnect.Reconnect,
+            ),
+            TunnelStatePreviewData.generateDisconnectingState(
+                actionAfterDisconnect = ActionAfterDisconnect.Block,
+            ),
+            TunnelStatePreviewData.generateErrorState(isBlocking = true),
+        )
+        .mapIndexed { index, state ->
+            ConnectUiState(
+                internetLocation =
+                    GeoIpLocation(
+                        ipv4 = InetAddress.getLocalHost(),
+                        ipv6 = null,
+                        country = "Sweden",
+                        city = "Göteborg",
+                        latitude = 23.3,
+                        longitude = 12.99,
+                        entryCountry = "EntryCountry",
+                        entryCity = "EntryCity",
+                        location =
+                            GeoLocationId.Hostname(
+                                city =
+                                    GeoLocationId.City(
+                                        country = GeoLocationId.Country(code = "se"),
+                                        code = "got",
+                                    ),
+                                code = "Hostname",
+                            ),
+                        entryLocation =
+                            GeoLocationId.Hostname(
+                                city =
+                                    GeoLocationId.City(
+                                        country = GeoLocationId.Country(code = "ec"),
+                                        code = "enc",
+                                    ),
+                                code = "EntryHostname",
+                            ),
+                    ),
+                selectedRelayItemTitle = "Relay Title",
+                tunnelState = state,
+                hops = ConnectionPath(),
+                locations = emptyList(),
+                inAppNotification =
+                    if (index == 0) InAppNotification.NewDevice("Test Device") else null,
+                deviceName = "Cool Beans",
+                daysLeftUntilExpiry = 42,
+                isPlayBuild = true,
+                showMigrationGuideNotificationDot = false,
+            )
+        }
