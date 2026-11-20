@@ -3293,6 +3293,9 @@ dependencies = [
 [[package]]
 name = "mullvad-api-constants"
 version = "0.0.0"
+dependencies = [
+ "http",
+]
 
 [[package]]
 name = "mullvad-cli"
@@ -3377,6 +3380,7 @@ dependencies = [
  "tokio-stream",
  "tracing-appender",
  "tracing-subscriber",
+ "vec1",
  "winapi",
  "windows-service",
  "windows-sys 0.61.2",
@@ -3522,6 +3526,7 @@ dependencies = [
  "futures",
  "hyper-util",
  "log",
+ "mullvad-api-constants",
  "mullvad-paths",
  "mullvad-types",
  "nix 0.31.3",
