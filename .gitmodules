@@ -1,6 +1,0 @@
-[submodule "dist-assets/binaries"]
-	path = dist-assets/binaries
-	url = https://github.com/mullvad/mullvadvpn-app-binaries
-[submodule "ios/wireguard-apple"]
-	path = ios/wireguard-apple
-	url = https://github.com/mullvad/wireguard-apple.git
