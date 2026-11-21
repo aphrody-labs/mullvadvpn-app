@@ -9,7 +9,7 @@ import utilities.Variant
 import utilities.allPlayDebugReleaseVariants
 import utilities.appVersionProvider
 import utilities.baselineFilter
-import utilities.configureMissingTranslationCheck
+import utilities.cargoCommand
 import utilities.fullReleaseArtifacts
 import utilities.fullReleaseTasks
 import utilities.generateRemapArguments
@@ -61,12 +61,9 @@ android {
 
         lint {
             lintConfig = file("${rootProject.projectDir}/config/lint.xml")
-            baseline = file("${rootProject.projectDir}/config/lint-baseline.xml")
             abortOnError = true
             checkAllWarnings = true
             warningsAsErrors = true
-            checkDependencies = true
-            configureMissingTranslationCheck(project, appVersion)
         }
     }
 
@@ -333,6 +330,8 @@ junitPlatform {
 }
 
 cargo {
+    cargoCommand = cargoCommand()
+
     val isReleaseBuild =
         isReleaseBuild() || getBooleanProperty("mullvad.app.build.cargo.forceReleaseBuild")
     val generateDebugSymbolsForReleaseBuilds =
@@ -373,7 +372,7 @@ cargo {
 
 tasks.register<Exec>("cargoClean") {
     workingDir = File(repoRootPath)
-    commandLine("cargo", "clean")
+    commandLine(cargoCommand(), "clean")
 }
 
 if (getBooleanProperty("mullvad.app.build.cargo.cleanBuild")) {
